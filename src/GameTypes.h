@@ -37,7 +37,6 @@ struct InputState {
     bool p2Left = false;
     bool p2Right = false;
 
-    bool globalHitPressed = false;
     bool p1HitPressed = false;
     bool p2HitPressed = false;
     bool pausePressed = false;

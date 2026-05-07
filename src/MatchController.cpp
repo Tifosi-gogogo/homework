@@ -113,29 +113,29 @@ QString ScoreSystem::pointName(int point) {
 
 MatchController::MatchController()
     : rng_(std::random_device{}()) {
-    reset(Gender::Male, Gender::Female);
+    reset(outfitByGenderIndex(Gender::Male, 0), racketByIndex(0),
+          outfitByGenderIndex(Gender::Female, 0), racketByIndex(0));
 }
 
-void MatchController::reset(Gender p1Gender, Gender p2Gender) {
+void MatchController::reset(const OutfitItem& p1Outfit, const RacketItem& p1Racket,
+                            const OutfitItem& p2Outfit, const RacketItem& p2Racket) {
     score_.reset();
     p1_ = Player{
         1,
-        p1Gender,
+        p1Outfit.gender,
         QStringLiteral("P1"),
         {0.0, 8.6},
-        QColor(244, 248, 255),
-        QColor(30, 116, 220),
-        p1Gender == Gender::Female ? QColor(73, 132, 230) : QColor(24, 70, 150),
+        p1Outfit,
+        p1Racket,
         false,
         0.0};
     p2_ = Player{
         2,
-        p2Gender,
+        p2Outfit.gender,
         QStringLiteral("P2"),
         {0.0, -8.6},
-        QColor(255, 245, 235),
-        QColor(214, 64, 82),
-        p2Gender == Gender::Female ? QColor(230, 92, 122) : QColor(132, 35, 55),
+        p2Outfit,
+        p2Racket,
         false,
         0.0};
 
@@ -143,7 +143,7 @@ void MatchController::reset(Gender p1Gender, Gender p2Gender) {
     phase_ = MatchPhase::ServeReady;
     time_ = 0.0;
     pointOverTimer_ = 0.0;
-    feedback_ = QStringLiteral("P1 serve: press Space or J");
+    feedback_ = QStringLiteral("P1 serve: press Space");
     feedbackTimer_ = 3.0;
     startServe(server_);
 }
@@ -175,7 +175,7 @@ void MatchController::update(const InputState& input, double dt) {
         const Player& serverPlayer = playerById(server_);
         ball_.pos = {serverPlayer.pos.x, serverPlayer.pos.y + (server_ == 1 ? -0.45 : 0.45), 1.05};
 
-        if (input.globalHitPressed || (server_ == 1 && input.p1HitPressed) ||
+        if ((server_ == 1 && input.p1HitPressed) ||
             (server_ == 2 && input.p2HitPressed)) {
             tryServe(server_);
         }
@@ -324,29 +324,10 @@ void MatchController::handleHitInput(const InputState& input) {
         return;
     }
 
-    bool handled = false;
-
-    if (input.globalHitPressed) {
-        const bool p1Can = canHit(p1_);
-        const bool p2Can = canHit(p2_);
-        if (p1Can && !p2Can) {
-            tryHit(p1_, input);
-            handled = true;
-        } else if (!p1Can && p2Can) {
-            tryHit(p2_, input);
-            handled = true;
-        } else if (p1Can && p2Can) {
-            const double p1Dist = length2D(p1_.pos, ball_.pos);
-            const double p2Dist = length2D(p2_.pos, ball_.pos);
-            tryHit(p1Dist <= p2Dist ? p1_ : p2_, input);
-            handled = true;
-        }
-    }
-
-    if (!handled && input.p1HitPressed) {
+    if (input.p1HitPressed) {
         tryHit(p1_, input);
     }
-    if (!handled && input.p2HitPressed) {
+    if (input.p2HitPressed) {
         tryHit(p2_, input);
     }
 }
@@ -369,8 +350,8 @@ void MatchController::startServe(int serverId) {
     ball_.bounceCount = 0;
     ball_.vel = {0.0, 0.0, 0.0};
     ball_.pos = {serverPlayer.pos.x, serverPlayer.pos.y + (serverId == 1 ? -0.45 : 0.45), 1.05};
-    feedback_ = serverId == 1 ? QStringLiteral("P1 serve: Space or J")
-                              : QStringLiteral("P2 serve: Space or Enter");
+    feedback_ = serverId == 1 ? QStringLiteral("P1 serve: Space")
+                              : QStringLiteral("P2 serve: J");
     feedbackTimer_ = 2.5;
 }
 
@@ -398,7 +379,7 @@ void MatchController::tryHit(Player& player, const InputState& input) {
     }
 
     const double dt = player.hitOpportunityActive ? time_ - player.hitOpportunityStart : 0.0;
-    const double probability = hitProbability(dt);
+    const double probability = std::min(1.0, hitProbability(dt) + player.racket.hitBonus);
     if (randomReal(0.0, 1.0) > probability) {
         endPoint(opponentOf(player.id), player.id == 1 ? QStringLiteral("P1 miss") : QStringLiteral("P2 miss"));
         return;
@@ -407,7 +388,7 @@ void MatchController::tryHit(Player& player, const InputState& input) {
     Vec3 target = chooseTarget(player, input);
     const double distance = std::sqrt((target.x - ball_.pos.x) * (target.x - ball_.pos.x) +
                                       (target.y - ball_.pos.y) * (target.y - ball_.pos.y));
-    const double flightTime = clampDouble(distance / 10.4, 0.70, 1.32);
+    const double flightTime = clampDouble(distance / 10.4 + randomReal(-0.08, 0.16), 0.68, 1.40);
     launchBallTo(target, player.id, flightTime);
 
     if (dt <= 0.1) {
@@ -425,7 +406,8 @@ bool MatchController::canHit(const Player& player) const {
         return false;
     }
     const double dist = length2D(player.pos, ball_.pos);
-    return dist <= HitRadius && ball_.pos.z >= MinHitHeight && ball_.pos.z <= MaxHitHeight;
+    return dist <= HitRadius + player.racket.rangeBonus &&
+           ball_.pos.z >= MinHitHeight && ball_.pos.z <= MaxHitHeight;
 }
 
 double MatchController::hitProbability(double dt) const {
@@ -448,39 +430,39 @@ double MatchController::hitProbability(double dt) const {
 }
 
 Vec3 MatchController::chooseTarget(const Player& player, const InputState& input) {
-    double x = randomReal(-0.45, 0.45);
-    double y = player.id == 1 ? -7.7 : 7.7;
+    double x = randomReal(-2.35, 2.35);
+    double y = player.id == 1 ? randomReal(-9.6, -4.4) : randomReal(4.4, 9.6);
 
     if (player.id == 1) {
         if (input.p1Left) {
-            x -= 2.45;
+            x -= 1.45;
         }
         if (input.p1Right) {
-            x += 2.45;
+            x += 1.45;
         }
         if (input.p1Up) {
-            y = -9.7;
+            y -= randomReal(0.8, 1.9);
         }
         if (input.p1Down) {
-            y = -4.9;
+            y += randomReal(0.8, 1.8);
         }
     } else {
         if (input.p2Left) {
-            x -= 2.45;
+            x -= 1.45;
         }
         if (input.p2Right) {
-            x += 2.45;
+            x += 1.45;
         }
         if (input.p2Down) {
-            y = 9.7;
+            y += randomReal(0.8, 1.9);
         }
         if (input.p2Up) {
-            y = 4.9;
+            y -= randomReal(0.8, 1.8);
         }
     }
 
-    x += randomReal(-0.32, 0.32);
-    y += randomReal(-0.42, 0.42);
+    x += randomReal(-player.racket.controlError, player.racket.controlError);
+    y += randomReal(-player.racket.controlError * 1.25, player.racket.controlError * 1.25);
     return {clampDouble(x, -CourtHalfWidth + 0.32, CourtHalfWidth - 0.32),
             clampDouble(y, player.id == 1 ? -CourtHalfLength + 0.45 : 0.8,
                         player.id == 1 ? -0.8 : CourtHalfLength - 0.45),
@@ -591,57 +573,207 @@ void MatchController::drawPlayer(QPainter& painter, const Player& player, const 
     painter.save();
     const QPointF feet = courtToScreen(player.pos.x, player.pos.y, 0.0, courtRect);
     const double scale = courtRect.height() / 720.0;
-    const double bodyW = 30.0 * scale;
-    const double bodyH = 38.0 * scale;
+    const double bodyW = 36.0 * scale;
+    const double bodyH = 42.0 * scale;
+    const double headR = 15.0 * scale;
+    const OutfitItem& outfit = player.outfit;
 
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor(0, 0, 0, 70));
-    painter.drawEllipse(QPointF(feet.x(), feet.y() + 7.0 * scale), 23.0 * scale, 8.0 * scale);
+    painter.drawEllipse(QPointF(feet.x(), feet.y() + 8.0 * scale), 28.0 * scale, 9.0 * scale);
 
-    QRectF body(feet.x() - bodyW / 2.0, feet.y() - bodyH - 14.0 * scale, bodyW, bodyH);
-    painter.setBrush(player.shirtColor);
-    painter.drawRoundedRect(body, 7.0 * scale, 7.0 * scale);
+    QRectF body(feet.x() - bodyW / 2.0, feet.y() - bodyH - 24.0 * scale, bodyW, bodyH);
+    const double legTop = body.bottom() - 2.0 * scale;
+
+    painter.setPen(QPen(QColor(248, 248, 242), 5.0 * scale, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(QPointF(body.center().x() - 8.0 * scale, legTop + 12.0 * scale),
+                     QPointF(body.center().x() - 11.0 * scale, feet.y() + 3.0 * scale));
+    painter.drawLine(QPointF(body.center().x() + 8.0 * scale, legTop + 12.0 * scale),
+                     QPointF(body.center().x() + 11.0 * scale, feet.y() + 3.0 * scale));
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(outfit.shoeColor);
+    painter.drawRoundedRect(QRectF(body.center().x() - 22.0 * scale, feet.y() - 1.0 * scale,
+                                   18.0 * scale, 8.0 * scale),
+                            4.0 * scale, 4.0 * scale);
+    painter.drawRoundedRect(QRectF(body.center().x() + 4.0 * scale, feet.y() - 1.0 * scale,
+                                   18.0 * scale, 8.0 * scale),
+                            4.0 * scale, 4.0 * scale);
+
+    painter.setBrush(outfit.shirtMain);
+    painter.drawRoundedRect(body, 9.0 * scale, 9.0 * scale);
+
+    painter.setBrush(outfit.shirtAccent);
+    painter.drawRoundedRect(QRectF(body.left() + 4.0 * scale, body.top() + 5.0 * scale,
+                                   8.0 * scale, body.height() - 8.0 * scale),
+                            4.0 * scale, 4.0 * scale);
+    painter.drawRoundedRect(QRectF(body.right() - 12.0 * scale, body.top() + 5.0 * scale,
+                                   8.0 * scale, body.height() - 8.0 * scale),
+                            4.0 * scale, 4.0 * scale);
+
+    painter.setBrush(outfit.collarColor);
+    QPolygonF collar;
+    collar << QPointF(body.center().x() - 8.0 * scale, body.top() + 2.0 * scale)
+           << QPointF(body.center().x(), body.top() + 13.0 * scale)
+           << QPointF(body.center().x() + 8.0 * scale, body.top() + 2.0 * scale);
+    painter.drawPolygon(collar);
+
+    painter.setBrush(outfit.sleeveColor);
+    painter.drawEllipse(QPointF(body.left() + 1.0 * scale, body.top() + 14.0 * scale),
+                        8.0 * scale, 11.0 * scale);
+    painter.drawEllipse(QPointF(body.right() - 1.0 * scale, body.top() + 14.0 * scale),
+                        8.0 * scale, 11.0 * scale);
+
+    painter.setPen(QPen(outfit.stripeColor, 2.0 * scale, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(QPointF(body.left() + 7.0 * scale, body.top() + 9.0 * scale),
+                     QPointF(body.left() + 7.0 * scale, body.bottom() - 7.0 * scale));
+    painter.drawLine(QPointF(body.right() - 7.0 * scale, body.top() + 9.0 * scale),
+                     QPointF(body.right() - 7.0 * scale, body.bottom() - 7.0 * scale));
+
+    painter.setFont(QFont(QStringLiteral("Segoe UI Symbol"), static_cast<int>(13 * scale), QFont::Bold));
+    painter.setPen(outfit.stripeColor);
+    painter.drawText(QRectF(body.center().x() - 12.0 * scale, body.top() + 16.0 * scale,
+                            24.0 * scale, 18.0 * scale),
+                     Qt::AlignCenter, outfit.chestMark);
+    painter.setPen(Qt::NoPen);
 
     if (player.gender == Gender::Female) {
         QPolygonF skirt;
-        skirt << QPointF(body.left() - 4.0 * scale, body.bottom() - 3.0 * scale)
-              << QPointF(body.right() + 4.0 * scale, body.bottom() - 3.0 * scale)
-              << QPointF(body.center().x() + 15.0 * scale, body.bottom() + 18.0 * scale)
-              << QPointF(body.center().x() - 15.0 * scale, body.bottom() + 18.0 * scale);
-        painter.setBrush(player.bottomColor);
+        skirt << QPointF(body.left() - 5.0 * scale, body.bottom() - 3.0 * scale)
+              << QPointF(body.right() + 5.0 * scale, body.bottom() - 3.0 * scale)
+              << QPointF(body.center().x() + 20.0 * scale, body.bottom() + 21.0 * scale)
+              << QPointF(body.center().x() - 20.0 * scale, body.bottom() + 21.0 * scale);
+        painter.setBrush(outfit.bottomMain);
         painter.drawPolygon(skirt);
+        painter.setPen(QPen(outfit.bottomAccent, 2.0 * scale, Qt::SolidLine, Qt::RoundCap));
+        for (int i = -2; i <= 2; ++i) {
+            painter.drawLine(QPointF(body.center().x() + i * 7.0 * scale, body.bottom()),
+                             QPointF(body.center().x() + i * 9.0 * scale, body.bottom() + 19.0 * scale));
+        }
+        painter.setPen(Qt::NoPen);
     } else {
-        painter.setBrush(player.bottomColor);
-        painter.drawRoundedRect(QRectF(body.left() + 2.0 * scale, body.bottom() - 2.0 * scale,
-                                       body.width() - 4.0 * scale, 20.0 * scale),
+        painter.setBrush(outfit.bottomMain);
+        painter.drawRoundedRect(QRectF(body.left() + 1.0 * scale, body.bottom() - 2.0 * scale,
+                                       body.width() / 2.0 - 3.0 * scale, 21.0 * scale),
                                 4.0 * scale, 4.0 * scale);
+        painter.drawRoundedRect(QRectF(body.center().x() + 2.0 * scale, body.bottom() - 2.0 * scale,
+                                       body.width() / 2.0 - 3.0 * scale, 21.0 * scale),
+                                4.0 * scale, 4.0 * scale);
+        painter.setPen(QPen(outfit.bottomAccent, 2.0 * scale));
+        painter.drawLine(QPointF(body.center().x(), body.bottom() + 2.0 * scale),
+                         QPointF(body.center().x(), body.bottom() + 17.0 * scale));
+        painter.setPen(Qt::NoPen);
     }
 
-    painter.setBrush(QColor(245, 202, 164));
-    painter.drawEllipse(QPointF(body.center().x(), body.top() - 12.0 * scale), 13.0 * scale, 13.0 * scale);
+    painter.setPen(QPen(QColor(245, 202, 164), 5.0 * scale, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(QPointF(body.left() + 3.0 * scale, body.top() + 20.0 * scale),
+                     QPointF(body.left() - 8.0 * scale, body.top() + 34.0 * scale));
+    painter.drawLine(QPointF(body.right() - 3.0 * scale, body.top() + 20.0 * scale),
+                     QPointF(body.right() + 10.0 * scale, body.top() + 34.0 * scale));
+    painter.setPen(Qt::NoPen);
 
-    painter.setBrush(player.hatColor);
-    painter.drawPie(QRectF(body.center().x() - 14.0 * scale, body.top() - 28.0 * scale,
-                           28.0 * scale, 18.0 * scale),
+    const QPointF headCenter(body.center().x(), body.top() - 18.0 * scale);
+    if (player.gender == Gender::Female) {
+        painter.setBrush(outfit.hairColor.darker(115));
+        painter.drawEllipse(QPointF(headCenter.x() + 13.0 * scale, headCenter.y() + 1.0 * scale),
+                            9.0 * scale, 13.0 * scale);
+    }
+    painter.setBrush(outfit.hairColor);
+    painter.drawEllipse(QPointF(headCenter.x(), headCenter.y() - 2.0 * scale),
+                        15.5 * scale, 14.0 * scale);
+    painter.setBrush(QColor(245, 202, 164));
+    painter.drawEllipse(headCenter, headR, headR);
+
+    painter.setBrush(outfit.hairColor);
+    painter.drawPie(QRectF(headCenter.x() - 14.0 * scale, headCenter.y() - 16.0 * scale,
+                           28.0 * scale, 17.0 * scale),
                     0, 180 * 16);
-    painter.drawRect(QRectF(body.center().x() + 6.0 * scale, body.top() - 18.0 * scale,
-                            14.0 * scale, 4.0 * scale));
+    painter.drawEllipse(QPointF(headCenter.x() - 9.0 * scale, headCenter.y() - 7.0 * scale),
+                        4.0 * scale, 5.0 * scale);
+    painter.drawEllipse(QPointF(headCenter.x() + 6.0 * scale, headCenter.y() - 7.0 * scale),
+                        4.0 * scale, 5.0 * scale);
+
+    painter.setBrush(outfit.hatColor);
+    painter.drawPie(QRectF(headCenter.x() - 17.0 * scale, headCenter.y() - 24.0 * scale,
+                           34.0 * scale, 20.0 * scale),
+                    0, 180 * 16);
+    painter.setBrush(outfit.shirtAccent);
+    painter.drawRoundedRect(QRectF(headCenter.x() + 6.0 * scale, headCenter.y() - 14.0 * scale,
+                                   18.0 * scale, 5.0 * scale),
+                            3.0 * scale, 3.0 * scale);
+
+    if (player.gender == Gender::Female) {
+        painter.setBrush(outfit.hatColor.lighter(112));
+        painter.drawEllipse(QPointF(headCenter.x() - 11.0 * scale, headCenter.y() - 24.0 * scale),
+                            4.0 * scale, 10.0 * scale);
+        painter.drawEllipse(QPointF(headCenter.x() + 4.0 * scale, headCenter.y() - 25.0 * scale),
+                            4.0 * scale, 10.0 * scale);
+    }
+
+    painter.setBrush(QColor(35, 41, 48));
+    painter.drawEllipse(QPointF(headCenter.x() - 5.5 * scale, headCenter.y() - 2.0 * scale),
+                        1.8 * scale, 2.6 * scale);
+    painter.drawEllipse(QPointF(headCenter.x() + 5.5 * scale, headCenter.y() - 2.0 * scale),
+                        1.8 * scale, 2.6 * scale);
+    painter.setBrush(QColor(255, 145, 160, 135));
+    painter.drawEllipse(QPointF(headCenter.x() - 10.0 * scale, headCenter.y() + 5.5 * scale),
+                        3.0 * scale, 2.0 * scale);
+    painter.drawEllipse(QPointF(headCenter.x() + 10.0 * scale, headCenter.y() + 5.5 * scale),
+                        3.0 * scale, 2.0 * scale);
+    painter.setPen(QPen(QColor(130, 65, 62), 1.4 * scale, Qt::SolidLine, Qt::RoundCap));
+    painter.drawArc(QRectF(headCenter.x() - 5.0 * scale, headCenter.y() + 1.0 * scale,
+                           10.0 * scale, 9.0 * scale),
+                    210 * 16, 120 * 16);
 
     const double racketDir = player.id == 1 ? 1.0 : -1.0;
     const QPointF hand(body.right() + 2.0 * scale, body.center().y());
     const QPointF grip(hand.x() + racketDir * 22.0 * scale, hand.y() + 14.0 * scale);
-    painter.setPen(QPen(QColor(71, 55, 42), 4.0 * scale, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(hand, grip);
-    painter.setPen(QPen(QColor(220, 224, 218), 3.0 * scale));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawEllipse(QPointF(grip.x() + racketDir * 13.0 * scale, grip.y() + 2.0 * scale),
-                         12.0 * scale, 17.0 * scale);
+    drawRacket(painter, player, grip, racketDir, scale);
 
     painter.setFont(QFont(QStringLiteral("Segoe UI"), static_cast<int>(11 * scale), QFont::Bold));
     painter.setPen(QColor(245, 248, 250));
     painter.drawText(QRectF(feet.x() - 28.0 * scale, feet.y() + 13.0 * scale,
                             56.0 * scale, 18.0 * scale),
                      Qt::AlignCenter, player.name);
+    painter.restore();
+}
+
+void MatchController::drawRacket(QPainter& painter, const Player& player, const QPointF& grip,
+                                 double racketDir, double scale) const {
+    const RacketItem& racket = player.racket;
+    const QPointF headCenter(grip.x() + racketDir * 15.0 * scale, grip.y() + 1.0 * scale);
+
+    painter.save();
+    painter.setPen(QPen(racket.gripColor, 5.0 * scale, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(QPointF(grip.x() - racketDir * 18.0 * scale, grip.y() - 12.0 * scale), grip);
+
+    painter.setPen(QPen(racket.frameColor, 4.0 * scale));
+    painter.setBrush(QColor(255, 255, 255, 18));
+    painter.drawEllipse(headCenter, 13.5 * scale, 18.0 * scale);
+
+    painter.setPen(QPen(racket.accentColor, 2.2 * scale));
+    painter.drawArc(QRectF(headCenter.x() - 12.0 * scale, headCenter.y() - 16.0 * scale,
+                           24.0 * scale, 32.0 * scale),
+                    35 * 16, 110 * 16);
+
+    painter.setPen(QPen(racket.stringColor, 0.9 * scale));
+    for (int i = -2; i <= 2; ++i) {
+        painter.drawLine(QPointF(headCenter.x() + i * 4.0 * scale, headCenter.y() - 14.0 * scale),
+                         QPointF(headCenter.x() + i * 4.0 * scale, headCenter.y() + 14.0 * scale));
+    }
+    for (int i = -2; i <= 2; ++i) {
+        painter.drawLine(QPointF(headCenter.x() - 10.0 * scale, headCenter.y() + i * 5.0 * scale),
+                         QPointF(headCenter.x() + 10.0 * scale, headCenter.y() + i * 5.0 * scale));
+    }
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(racket.accentColor);
+    for (int i = 0; i < racket.starLevel; ++i) {
+        painter.drawEllipse(QPointF(headCenter.x() - 8.0 * scale + i * 4.0 * scale,
+                                    headCenter.y() - 22.0 * scale),
+                            1.3 * scale, 1.3 * scale);
+    }
+
     painter.restore();
 }
 
@@ -694,7 +826,7 @@ void MatchController::drawOverlay(QPainter& painter, const QSize& size) const {
     painter.setFont(QFont(QStringLiteral("Segoe UI"), 10));
     painter.drawText(QRectF(topPanel.right() - 330, topPanel.top() + 10, 310, 38),
                      Qt::AlignRight | Qt::AlignVCenter,
-                     QStringLiteral("P1 WASD + J    P2 Arrows + Enter    Space global hit"));
+                     QStringLiteral("P1 WASD + Space    P2 Arrows + J"));
 
     if (feedbackTimer_ > 0.0 || phase_ == MatchPhase::ServeReady || phase_ == MatchPhase::MatchOver) {
         QRectF box(size.width() / 2.0 - 180, size.height() - 82, 360, 44);

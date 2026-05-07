@@ -15,8 +15,9 @@ GameWidget::GameWidget(QWidget* parent)
     frameTimer_.start(16);
 }
 
-void GameWidget::startMatch(Gender p1Gender, Gender p2Gender) {
-    match_.reset(p1Gender, p2Gender);
+void GameWidget::startMatch(const OutfitItem& p1Outfit, const RacketItem& p1Racket,
+                            const OutfitItem& p2Outfit, const RacketItem& p2Racket) {
+    match_.reset(p1Outfit, p1Racket, p2Outfit, p2Racket);
     finishSignalSent_ = false;
     input_ = InputState{};
     elapsedTimer_.restart();
@@ -93,16 +94,10 @@ void GameWidget::setKeyState(int key, bool down) {
         break;
     case Qt::Key_Space:
         if (down) {
-            input_.globalHitPressed = true;
-        }
-        break;
-    case Qt::Key_J:
-        if (down) {
             input_.p1HitPressed = true;
         }
         break;
-    case Qt::Key_Return:
-    case Qt::Key_Enter:
+    case Qt::Key_J:
         if (down) {
             input_.p2HitPressed = true;
         }
@@ -118,7 +113,6 @@ void GameWidget::setKeyState(int key, bool down) {
 }
 
 void GameWidget::clearPressedFlags() {
-    input_.globalHitPressed = false;
     input_.p1HitPressed = false;
     input_.p2HitPressed = false;
     input_.pausePressed = false;

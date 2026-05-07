@@ -16,6 +16,8 @@ add_executable(TennisDuel
     src/MainWindow.cpp
     src/GameWidget.h
     src/GameWidget.cpp
+    src/ItemCatalog.h
+    src/ItemCatalog.cpp
     src/MatchController.h
     src/MatchController.cpp
     src/GameTypes.h

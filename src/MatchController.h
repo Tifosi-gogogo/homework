@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GameTypes.h"
+#include "ItemCatalog.h"
 
 #include <QColor>
 #include <QPainter>
@@ -37,9 +38,8 @@ struct Player {
     Gender gender = Gender::Male;
     QString name;
     Vec2 pos;
-    QColor hatColor;
-    QColor shirtColor;
-    QColor bottomColor;
+    OutfitItem outfit;
+    RacketItem racket;
     bool hitOpportunityActive = false;
     double hitOpportunityStart = 0.0;
 };
@@ -58,7 +58,8 @@ class MatchController {
 public:
     MatchController();
 
-    void reset(Gender p1Gender, Gender p2Gender);
+    void reset(const OutfitItem& p1Outfit, const RacketItem& p1Racket,
+               const OutfitItem& p2Outfit, const RacketItem& p2Racket);
     void update(const InputState& input, double dt);
     void draw(QPainter& painter, const QSize& size) const;
 
@@ -90,6 +91,8 @@ private:
 
     void drawCourt(QPainter& painter, const QRectF& courtRect) const;
     void drawPlayer(QPainter& painter, const Player& player, const QRectF& courtRect) const;
+    void drawRacket(QPainter& painter, const Player& player, const QPointF& grip,
+                    double racketDir, double scale) const;
     void drawBall(QPainter& painter, const QRectF& courtRect) const;
     void drawOverlay(QPainter& painter, const QSize& size) const;
 
@@ -102,7 +105,7 @@ private:
     static constexpr double NetHeight = 0.914;
     static constexpr double Gravity = 9.8;
     static constexpr double PlayerSpeed = 5.25;
-    static constexpr double HitRadius = 1.18;
+    static constexpr double HitRadius = 1.45;
     static constexpr double MinHitHeight = 0.05;
     static constexpr double MaxHitHeight = 2.35;
 
