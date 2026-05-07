@@ -11,4 +11,5 @@ build_*/
 *.ilk
 *.log
 *.tmp
+cmake_config.*
 ~$*

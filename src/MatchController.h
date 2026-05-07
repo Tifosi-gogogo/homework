@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GameTypes.h"
+#include "ItemCatalog.h"
 
 #include <QColor>
 #include <QPainter>
@@ -16,6 +17,8 @@ public:
     bool isMatchOver() const;
     int matchWinner() const;
     int gamesFor(int playerId) const;
+    QString pointTextFor(int playerId) const;
+    QString scoreNoteText() const;
     QString pointText() const;
     QString gamesText() const;
     QString matchSummary() const;
@@ -37,11 +40,11 @@ struct Player {
     Gender gender = Gender::Male;
     QString name;
     Vec2 pos;
-    QColor hatColor;
-    QColor shirtColor;
-    QColor bottomColor;
+    OutfitItem outfit;
+    RacketItem racket;
     bool hitOpportunityActive = false;
     double hitOpportunityStart = 0.0;
+    double hitPoseTimer = 0.0;
 };
 
 struct Ball {
@@ -58,7 +61,10 @@ class MatchController {
 public:
     MatchController();
 
-    void reset(Gender p1Gender, Gender p2Gender);
+    void reset(const OutfitItem& p1Outfit, const RacketItem& p1Racket,
+               const OutfitItem& p2Outfit, const RacketItem& p2Racket,
+               PlayMode playMode = PlayMode::DoublePlayer,
+               AiDifficulty aiDifficulty = AiDifficulty::Medium);
     void update(const InputState& input, double dt);
     void draw(QPainter& painter, const QSize& size) const;
 
@@ -67,6 +73,12 @@ public:
     QString matchSummary() const;
 
 private:
+    enum class ServeFaultPlan {
+        None,
+        Net,
+        Out
+    };
+
     QPointF courtToScreen(double x, double y, double z, const QRectF& courtRect) const;
     QRectF courtRectFor(const QSize& size) const;
 
@@ -74,6 +86,8 @@ private:
     void updateBall(double dt);
     void updateHitOpportunities();
     void handleHitInput(const InputState& input);
+    void applyAiMovement(InputState& input, double dt);
+    void updateAiHitDecision(InputState& input);
 
     void resetForNextPoint();
     void startServe(int serverId);
@@ -82,14 +96,22 @@ private:
     bool canHit(const Player& player) const;
     double hitProbability(double dt) const;
     Vec3 chooseTarget(const Player& player, const InputState& input);
+    Vec3 chooseAiTarget(const Player& player);
     Vec3 chooseServeTarget(int serverId);
+    ServeFaultPlan chooseServeFaultPlan(int serverId);
     void launchBallTo(const Vec3& target, int hitterId, double flightTime);
+    Vec2 predictBallLanding() const;
+    double aiHitBonus() const;
 
+    bool isLegalServeBounce(const Vec3& pos) const;
+    void registerServeFault(const QString& reason);
     void handleBounce();
     void endPoint(int winner, const QString& reason);
 
     void drawCourt(QPainter& painter, const QRectF& courtRect) const;
     void drawPlayer(QPainter& painter, const Player& player, const QRectF& courtRect) const;
+    void drawRacket(QPainter& painter, const Player& player, const QPointF& grip,
+                    double racketDir, double scale) const;
     void drawBall(QPainter& painter, const QRectF& courtRect) const;
     void drawOverlay(QPainter& painter, const QSize& size) const;
 
@@ -102,7 +124,7 @@ private:
     static constexpr double NetHeight = 0.914;
     static constexpr double Gravity = 9.8;
     static constexpr double PlayerSpeed = 5.25;
-    static constexpr double HitRadius = 1.18;
+    static constexpr double HitRadius = 1.45;
     static constexpr double MinHitHeight = 0.05;
     static constexpr double MaxHitHeight = 2.35;
 
@@ -111,11 +133,23 @@ private:
     Ball ball_;
     ScoreSystem score_;
     MatchPhase phase_ = MatchPhase::ServeReady;
+    PlayMode playMode_ = PlayMode::DoublePlayer;
+    AiDifficulty aiDifficulty_ = AiDifficulty::Medium;
     int server_ = 1;
+    int serveFaults_ = 0;
     double time_ = 0.0;
     double pointOverTimer_ = 0.0;
+    double aiServeTimer_ = 0.0;
+    bool serveInFlight_ = false;
+    bool aiOpportunityWasActive_ = false;
+    ServeFaultPlan plannedServeFault_ = ServeFaultPlan::None;
+    double aiReactionDelay_ = 0.35;
+    Vec2 aiMoveTarget_;
+    int aiPlannedLastHitPlayer_ = 0;
+    int aiPlannedBounceCount_ = -1;
     QString feedback_;
     double feedbackTimer_ = 0.0;
+    int courtTheme_ = 0;
     mutable QRectF lastCourtRect_;
     std::mt19937 rng_;
 };

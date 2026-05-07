@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GameTypes.h"
+#include "ItemCatalog.h"
 #include "MatchController.h"
 
 #include <QElapsedTimer>
@@ -13,7 +14,10 @@ class GameWidget : public QWidget {
 public:
     explicit GameWidget(QWidget* parent = nullptr);
 
-    void startMatch(Gender p1Gender, Gender p2Gender);
+    void startMatch(const OutfitItem& p1Outfit, const RacketItem& p1Racket,
+                    const OutfitItem& p2Outfit, const RacketItem& p2Racket,
+                    PlayMode playMode = PlayMode::DoublePlayer,
+                    AiDifficulty aiDifficulty = AiDifficulty::Medium);
     void setMatchFinishedHandler(std::function<void(int, const QString&)> handler);
 
 protected:

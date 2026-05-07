@@ -15,6 +15,17 @@ enum class MatchPhase {
     MatchOver
 };
 
+enum class PlayMode {
+    DoublePlayer,
+    SinglePlayer
+};
+
+enum class AiDifficulty {
+    Easy,
+    Medium,
+    Hard
+};
+
 struct Vec2 {
     double x = 0.0;
     double y = 0.0;
@@ -37,7 +48,6 @@ struct InputState {
     bool p2Left = false;
     bool p2Right = false;
 
-    bool globalHitPressed = false;
     bool p1HitPressed = false;
     bool p2HitPressed = false;
     bool pausePressed = false;
